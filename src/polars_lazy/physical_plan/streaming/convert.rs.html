@@ -1,0 +1,628 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `polars/polars-lazy/src/physical_plan/streaming/convert.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>convert.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><div class="width-limiter"><nav class="sub"><a class="sub-logo-container" href="../../../../polars_lazy/index.html"><img class="rust-logo" src="../../../../rust-logo.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+</pre><pre class="rust"><code><span class="kw">use </span>std::any::Any;
+<span class="kw">use </span>std::collections::VecDeque;
+<span class="kw">use </span>std::sync::Arc;
+
+<span class="kw">use </span>polars_core::error::PolarsResult;
+<span class="kw">use </span>polars_core::frame::DataFrame;
+<span class="kw">use </span>polars_core::prelude::<span class="kw-2">*</span>;
+<span class="kw">use </span>polars_core::schema::Schema;
+<span class="kw">use </span>polars_pipe::expressions::PhysicalPipedExpr;
+<span class="kw">use </span>polars_pipe::operators::chunks::DataChunk;
+<span class="kw">use </span>polars_pipe::pipeline::{create_pipeline, get_dummy_operator, get_operator, PipeLine};
+<span class="kw">use </span>polars_plan::prelude::<span class="kw-2">*</span>;
+
+<span class="kw">use </span><span class="kw">crate</span>::physical_plan::planner::create_physical_expr;
+<span class="kw">use </span><span class="kw">crate</span>::physical_plan::state::ExecutionState;
+<span class="kw">use </span><span class="kw">crate</span>::physical_plan::PhysicalExpr;
+
+<span class="kw">pub struct </span>Wrap(Arc&lt;<span class="kw">dyn </span>PhysicalExpr&gt;);
+
+<span class="kw">impl </span>PhysicalPipedExpr <span class="kw">for </span>Wrap {
+    <span class="kw">fn </span>evaluate(<span class="kw-2">&amp;</span><span class="self">self</span>, chunk: <span class="kw-2">&amp;</span>DataChunk, state: <span class="kw-2">&amp;</span><span class="kw">dyn </span>Any) -&gt; PolarsResult&lt;Series&gt; {
+        <span class="kw">let </span>state = state.downcast_ref::&lt;ExecutionState&gt;().unwrap();
+        <span class="self">self</span>.<span class="number">0</span>.evaluate(<span class="kw-2">&amp;</span>chunk.data, state)
+    }
+    <span class="kw">fn </span>field(<span class="kw-2">&amp;</span><span class="self">self</span>, input_schema: <span class="kw-2">&amp;</span>Schema) -&gt; PolarsResult&lt;Field&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.to_field(input_schema)
+    }
+}
+
+<span class="kw">fn </span>to_physical_piped_expr(
+    node: Node,
+    expr_arena: <span class="kw-2">&amp;</span>Arena&lt;AExpr&gt;,
+) -&gt; PolarsResult&lt;Arc&lt;<span class="kw">dyn </span>PhysicalPipedExpr&gt;&gt; {
+    <span class="comment">// this is a double Arc&lt;dyn&gt; explore if we can create a single of it.
+    </span>create_physical_expr(node, Context::Default, expr_arena)
+        .map(|e| Arc::new(Wrap(e)) <span class="kw">as </span>Arc&lt;<span class="kw">dyn </span>PhysicalPipedExpr&gt;)
+}
+
+<span class="kw">fn </span>is_streamable(node: Node, expr_arena: <span class="kw-2">&amp;</span>Arena&lt;AExpr&gt;) -&gt; bool {
+    expr_arena.iter(node).all(|(<span class="kw">_</span>, ae)| <span class="kw">match </span>ae {
+        AExpr::Function { options, .. } | AExpr::AnonymousFunction { options, .. } =&gt; {
+            <span class="macro">matches!</span>(options.collect_groups, ApplyOptions::ApplyFlat)
+        }
+        AExpr::Cast { .. }
+        | AExpr::Column(<span class="kw">_</span>)
+        | AExpr::Literal(<span class="kw">_</span>)
+        | AExpr::BinaryExpr { .. }
+        | AExpr::Alias(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+    })
+}
+
+<span class="kw">fn </span>all_streamable(exprs: <span class="kw-2">&amp;</span>[Node], expr_arena: <span class="kw-2">&amp;</span>Arena&lt;AExpr&gt;) -&gt; bool {
+    exprs.iter().all(|node| is_streamable(<span class="kw-2">*</span>node, expr_arena))
+}
+
+<span class="attr">#[cfg(any(feature = <span class="string">&quot;csv-file&quot;</span>, feature = <span class="string">&quot;parquet&quot;</span>))]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_streaming_nodes(
+    root: Node,
+    lp_arena: <span class="kw-2">&amp;mut </span>Arena&lt;ALogicalPlan&gt;,
+    expr_arena: <span class="kw-2">&amp;mut </span>Arena&lt;AExpr&gt;,
+    scratch: <span class="kw-2">&amp;mut </span>Vec&lt;Node&gt;,
+) -&gt; PolarsResult&lt;()&gt; {
+    scratch.clear();
+
+    <span class="kw">let </span><span class="kw-2">mut </span>stack = Vec::with_capacity(lp_arena.len() / <span class="number">3 </span>+ <span class="number">1</span>);
+    stack.push((root, State::default()));
+
+    <span class="comment">// A state holds a full pipeline until the breaker
+    //  1/\
+    //   2/\
+    //     3\
+    //
+    // so 1 and 2 are short pipelines and 3 goes all the way to the root.
+    // but 3 can only run if 1 and 2 have finished and set the join as operator in 3
+    // and state are filled with pipeline 1, 2, 3 in that order
+    //
+    //     / \
+    //  /\  3/\
+    //  1 2    4\
+    // or in this case 1, 2, 3, 4
+    </span><span class="kw">let </span><span class="kw-2">mut </span>states = <span class="macro">vec!</span>[];
+
+    <span class="kw">use </span>ALogicalPlan::<span class="kw-2">*</span>;
+    <span class="kw">while let </span><span class="prelude-val">Some</span>((root, <span class="kw-2">mut </span>state)) = stack.pop() {
+        <span class="kw">match </span>lp_arena.get(root) {
+            Selection { input, predicate } <span class="kw">if </span>is_streamable(<span class="kw-2">*</span>predicate, expr_arena) =&gt; {
+                state.streamable = <span class="bool-val">true</span>;
+                state.operators_sinks.push((<span class="bool-val">false</span>, <span class="bool-val">false</span>, root));
+                stack.push((<span class="kw-2">*</span>input, state))
+            }
+            HStack { input, exprs, .. } <span class="kw">if </span>all_streamable(exprs, expr_arena) =&gt; {
+                state.streamable = <span class="bool-val">true</span>;
+                state.operators_sinks.push((<span class="bool-val">false</span>, <span class="bool-val">false</span>, root));
+                stack.push((<span class="kw-2">*</span>input, state))
+            }
+            MapFunction {
+                input,
+                function: FunctionNode::FastProjection { .. },
+            } =&gt; {
+                state.streamable = <span class="bool-val">true</span>;
+                state.operators_sinks.push((<span class="bool-val">false</span>, <span class="bool-val">false</span>, root));
+                stack.push((<span class="kw-2">*</span>input, state))
+            }
+            Projection { input, expr, .. } <span class="kw">if </span>all_streamable(expr, expr_arena) =&gt; {
+                state.streamable = <span class="bool-val">true</span>;
+                state.operators_sinks.push((<span class="bool-val">false</span>, <span class="bool-val">false</span>, root));
+                stack.push((<span class="kw-2">*</span>input, state))
+            }
+            MapFunction {
+                input,
+                function: FunctionNode::Rechunk,
+            } =&gt; {
+                <span class="comment">// we ignore a rechunk
+                </span>state.streamable = <span class="bool-val">true</span>;
+                stack.push((<span class="kw-2">*</span>input, state))
+            }
+            <span class="attr">#[cfg(feature = <span class="string">&quot;csv-file&quot;</span>)]
+            </span>CsvScan { .. } =&gt; {
+                <span class="kw">if </span>state.streamable {
+                    state.sources.push(root);
+                    states.push(state)
+                }
+            }
+            <span class="attr">#[cfg(feature = <span class="string">&quot;parquet&quot;</span>)]
+            </span>ParquetScan { .. } =&gt; {
+                <span class="kw">if </span>state.streamable {
+                    state.sources.push(root);
+                    states.push(state)
+                }
+            }
+            DataFrameScan { .. } =&gt; {
+                <span class="kw">if </span>state.streamable {
+                    state.sources.push(root);
+                    states.push(state)
+                }
+            }
+            <span class="attr">#[cfg(feature = <span class="string">&quot;cross_join&quot;</span>)]
+            </span>Join {
+                input_left,
+                input_right,
+                options,
+                ..
+            } <span class="kw">if </span><span class="macro">matches!</span>(options.how, JoinType::Cross) =&gt; {
+                state.streamable = <span class="bool-val">true</span>;
+                <span class="comment">// rhs
+                </span><span class="kw">let </span><span class="kw-2">mut </span>state_right = state;
+                state_right.operators_sinks.push((<span class="bool-val">true</span>, <span class="bool-val">true</span>, root));
+                stack.push((<span class="kw-2">*</span>input_right, state_right));
+
+                <span class="comment">// we want to traverse lhs first, so push it latest on the stack
+                // lhs is a new pipeline
+                </span><span class="kw">let </span><span class="kw-2">mut </span>state_left = State {
+                    streamable: <span class="bool-val">true</span>,
+                    ..Default::default()
+                };
+                state_left.operators_sinks.push((<span class="bool-val">true</span>, <span class="bool-val">false</span>, root));
+                stack.push((<span class="kw-2">*</span>input_left, state_left));
+            }
+            <span class="comment">// add globbing patterns
+            </span><span class="attr">#[cfg(all(feature = <span class="string">&quot;csv-file&quot;</span>, feature = <span class="string">&quot;parquet&quot;</span>))]
+            </span>Union { inputs, .. } =&gt; {
+                <span class="kw">if </span>state.streamable
+                    &amp;&amp; inputs.iter().all(|node| <span class="kw">match </span>lp_arena.get(<span class="kw-2">*</span>node) {
+                        ParquetScan { .. } =&gt; <span class="bool-val">true</span>,
+                        CsvScan { .. } =&gt; <span class="bool-val">true</span>,
+                        MapFunction {
+                            input,
+                            function: FunctionNode::Rechunk,
+                        } =&gt; {
+                            <span class="macro">matches!</span>(lp_arena.get(<span class="kw-2">*</span>input), ParquetScan { .. } | CsvScan { .. })
+                        }
+                        <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+                    })
+                {
+                    state.sources.push(root);
+                    states.push(state);
+                }
+            }
+            Aggregate {
+                input,
+                aggs,
+                maintain_order: <span class="bool-val">false</span>,
+                apply: <span class="prelude-val">None</span>,
+                ..
+            } =&gt; {
+                <span class="kw">if </span>aggs
+                    .iter()
+                    .all(|node| polars_pipe::pipeline::can_convert_to_hash_agg(<span class="kw-2">*</span>node, expr_arena))
+                {
+                    state.streamable = <span class="bool-val">true</span>;
+                    state.operators_sinks.push((<span class="bool-val">true</span>, <span class="bool-val">false</span>, root));
+                    stack.push((<span class="kw-2">*</span>input, state))
+                } <span class="kw">else </span>{
+                    stack.push((<span class="kw-2">*</span>input, State::default()))
+                }
+            }
+            lp =&gt; {
+                state.streamable = <span class="bool-val">false</span>;
+                lp.copy_inputs(scratch);
+                <span class="kw">while let </span><span class="prelude-val">Some</span>(input) = scratch.pop() {
+                    stack.push((input, State::default()))
+                }
+            }
+        }
+    }
+
+    <span class="kw">let </span><span class="kw-2">mut </span>pipelines = VecDeque::with_capacity(states.len());
+
+    <span class="comment">// if join is
+    //     1
+    //    /\2
+    //      /\3
+    //
+    // we are iterating from 3 to 1.
+
+    // the most far right branch will be the latest that sets this
+    // variable and thus will point to root
+    </span><span class="kw">let </span><span class="kw-2">mut </span>latest = Default::default();
+
+    <span class="kw">for </span>state <span class="kw">in </span>states {
+        <span class="comment">// should be reset for every branch
+        </span><span class="kw">let </span><span class="kw-2">mut </span>sink_node = <span class="prelude-val">None</span>;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>operators = Vec::with_capacity(state.operators_sinks.len());
+        <span class="kw">let </span><span class="kw-2">mut </span>operator_nodes = Vec::with_capacity(state.operators_sinks.len());
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = state.operators_sinks.into_iter().rev();
+
+        <span class="kw">for </span>(is_sink, is_rhs_join, node) <span class="kw">in </span><span class="kw-2">&amp;mut </span>iter {
+            latest = node;
+            <span class="kw">if </span>is_sink &amp;&amp; !is_rhs_join {
+                sink_node = <span class="prelude-val">Some</span>(node);
+            } <span class="kw">else </span>{
+                operator_nodes.push(node);
+                <span class="kw">let </span>op = <span class="kw">if </span>is_rhs_join {
+                    get_dummy_operator()
+                } <span class="kw">else </span>{
+                    get_operator(node, lp_arena, expr_arena, <span class="kw-2">&amp;</span>to_physical_piped_expr)<span class="question-mark">?
+                </span>};
+                operators.push(op)
+            }
+        }
+
+        <span class="kw">let </span>pipeline = create_pipeline(
+            <span class="kw-2">&amp;</span>state.sources,
+            operators,
+            operator_nodes,
+            sink_node,
+            lp_arena,
+            expr_arena,
+            to_physical_piped_expr,
+        )<span class="question-mark">?</span>;
+        pipelines.push_back(pipeline);
+    }
+    <span class="comment">// the most right latest node should be the root of the pipeline
+    </span><span class="kw">let </span>schema = lp_arena.get(latest).schema(lp_arena).into_owned();
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>most_left) = pipelines.pop_front() {
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(rhs) = pipelines.pop_front() {
+            most_left = most_left.with_rhs(rhs)
+        }
+        <span class="comment">// replace the part of the logical plan with a `MapFunction` that will execute the pipeline.
+        </span><span class="kw">let </span>pipeline_node = get_pipeline_node(lp_arena, most_left, schema);
+        lp_arena.replace(latest, pipeline_node)
+    } <span class="kw">else </span>{
+        <span class="macro">panic!</span>()
+    }
+
+    <span class="prelude-val">Ok</span>(())
+}
+
+<span class="kw">type </span>IsSink = bool;
+<span class="comment">// a rhs of a join will be replaced later
+</span><span class="kw">type </span>IsRhsJoin = bool;
+
+<span class="attr">#[derive(Default, Debug, Clone)]
+</span><span class="kw">struct </span>State {
+    streamable: bool,
+    sources: Vec&lt;Node&gt;,
+    <span class="comment">// node is operator/sink
+    </span>operators_sinks: Vec&lt;(IsSink, IsRhsJoin, Node)&gt;,
+}
+
+<span class="kw">fn </span>get_pipeline_node(
+    lp_arena: <span class="kw-2">&amp;mut </span>Arena&lt;ALogicalPlan&gt;,
+    <span class="kw-2">mut </span>pipeline: PipeLine,
+    schema: SchemaRef,
+) -&gt; ALogicalPlan {
+    <span class="comment">// create a dummy input as the map function will call the input
+    // so we just create a scan that returns an empty df
+    </span><span class="kw">let </span>dummy = lp_arena.add(ALogicalPlan::DataFrameScan {
+        df: Arc::new(DataFrame::empty()),
+        schema: Arc::new(Schema::new()),
+        output_schema: <span class="prelude-val">None</span>,
+        projection: <span class="prelude-val">None</span>,
+        selection: <span class="prelude-val">None</span>,
+    });
+
+    ALogicalPlan::MapFunction {
+        function: FunctionNode::Pipeline {
+            function: Arc::new(<span class="kw">move </span>|_df: DataFrame| {
+                <span class="kw">let </span>state = ExecutionState::new();
+                <span class="kw">if </span>state.verbose() {
+                    <span class="macro">eprintln!</span>(<span class="string">&quot;RUN STREAMING PIPELINE&quot;</span>)
+                }
+                <span class="kw">let </span>state = Box::new(state) <span class="kw">as </span>Box&lt;<span class="kw">dyn </span>Any + Send + Sync&gt;;
+                pipeline.execute(state)
+            }),
+            schema,
+        },
+        input: dummy,
+    }
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="polars_lazy" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.67.0-nightly (edf018221 2022-11-02)" ></div></body></html>

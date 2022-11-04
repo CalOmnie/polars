@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["FinalizedSink",""],["SinkResult",""]],"mod":[["chunks",""]],"trait":[["Sink",""]]};
